@@ -16,7 +16,7 @@ frame () {
     for str in "$@"; do
         len=$(( ${#str} > len ? ${#str} : len ))
     done
-    for (( i = 0; i < ( ${WIDTH} - len + 4 ) / 2; ++i )); do
+    for (( i = 0; i < ( ${WIDTH} - len - 4 ) / 2; ++i )); do
         printf ' '
     done
     for (( i = 0; i < len + 4; ++i )); do
@@ -25,14 +25,14 @@ frame () {
     printf '\n'
 
     for str in "$@"; do
-        for (( i = 0; i < ( ${WIDTH} - len + 4 ) / 2; ++i )); do
+        for (( i = 0; i < ( ${WIDTH} - len - 4 ) / 2; ++i )); do
             printf ' '
         done
         printf "| %-${len}s |" "$str"
         printf '\n'
     done
 
-    for (( i = 0; i < ( ${WIDTH} - len + 4 ) / 2; ++i )); do
+    for (( i = 0; i < ( ${WIDTH} - len - 4 ) / 2; ++i )); do
         printf ' '
     done
     for (( i = 0; i < len + 4; ++i )); do
@@ -84,9 +84,9 @@ ifconfig -a
 opt=$(ifconfig -a | grep -E -o "^\w+")
 PS3=" [1] Select network interface: 
  -> "
-select word in $opt; do
-    if [ -n "$word" ]; then
-        net=$word
+select word in ${opt}; do
+    if [ -n "${word}" ]; then
+        net=${word}
         break
     else
         echo "[ERROR] Invaild option"
@@ -102,15 +102,62 @@ if [ -z "${size}" ]; then
     size=100
 fi
 echo Maximum ${size} MB...
+fileName="${path}/${file}.pcap"
 
-fileName=${$(uuid)##*-}.log
-
+# Main window
 frame "TTC PACKLET ANALYZER" "by Jason Huang"
 sleep 1
-frame "Testing \"ls -l\" in frames:"
-sleep 2
-command ls -l
-sleep 2
-frame "This is all for now"
 
-tshark -i ${net} -w ${fileName} -a filesize:$(( ${size}*1024 ))
+# clear stdin buffer
+while read -r -t 0; do read -r; done
+
+op="x"
+addr="all"
+port="all"
+protocol="all"
+method="all"
+
+while [ "${op}" != "r" ]; do
+    frame "TTC PACKLET ANALYZER" "* Record at ${ip} and Stored at ${fileName}" \
+    "* Listen on ${net} and maximum size is ${size} MB" \
+    "============================================" \
+    "Options:" \
+    "[a] Specific address: ${addr}" "[b] Specific ports: ${port}" \
+    "[c] Specific protocol: ${protocol}" "[d] Specific http method: ${method}" \
+    "============================================" \
+    "  [r] Start capture     [x] Clear options" \
+    "  [q] Exit the program"
+    read -n1 -s op
+    case ${op} in 
+     "a")
+        clear
+        read -p " Specific address: " addr
+        ;;
+     "b")
+        clear
+        read -p " Specific ports: " port
+        ;;
+     "c")
+        clear
+        read -p " Specific protocol: " protocol
+        ;;
+     "d")
+        clear
+        read -p " Specific http method: " method
+        ;;
+     "x")
+        addr="all"
+        port="all"
+        protocol="all"
+        method="all"
+        ;;
+     "q")
+        clear
+        frame "Goodbye!"
+        exit 0
+        ;;
+    esac
+done
+
+tshark -i ${net} -w ${fileName} -a filesize:$(( ${size}*1024 )) \
+-f ${filter} 
