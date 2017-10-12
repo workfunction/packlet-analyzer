@@ -1,62 +1,15 @@
 #!/bin/bash
 
-USAGE="USAGE :\nsh analyzer.sh <ouput file> <IP>"
+USAGE="USAGE :\nsh analyzer.sh <ouput file>"
 WIDTH=$(tput cols)
 HEIGHT=$(tput lines)
-
-# show the frame
-frame () {
-    clear
-    local i
-    for (( i = 0; i < ( ${HEIGHT} - $# + 2 ) / 2; ++i )); do
-        echo
-    done
-
-    local len=0
-    for str in "$@"; do
-        len=$(( ${#str} > len ? ${#str} : len ))
-    done
-    for (( i = 0; i < ( ${WIDTH} - len - 4 ) / 2; ++i )); do
-        printf ' '
-    done
-    for (( i = 0; i < len + 4; ++i )); do
-        printf '-'
-    done
-    printf '\n'
-
-    for str in "$@"; do
-        for (( i = 0; i < ( ${WIDTH} - len - 4 ) / 2; ++i )); do
-            printf ' '
-        done
-        printf "| %-${len}s |" "$str"
-        printf '\n'
-    done
-
-    for (( i = 0; i < ( ${WIDTH} - len - 4 ) / 2; ++i )); do
-        printf ' '
-    done
-    for (( i = 0; i < len + 4; ++i )); do
-        printf '-'
-    done
-    for (( i = 0; i < ( ${HEIGHT} - $# + 1 ) / 2; ++i )); do
-        echo
-    done
-}
-
-# split command output
-command () {
-    IFS=$'\n'
-    lines=($($*))
-    frame ${lines[@]}
-    unset IFS
-}
 
 # determine input arguments
 if [ $1 == "--help" ]; then
     echo ${USAGE}
     exit 0
-elif [ $# -ne "2" ]; then
-    echo "[ERROR] Too few arguments..."
+elif [ $# -ne "1" ]; then
+    echo "[ERROR] Bad agruments"
     echo ${USAGE}
     exit -1
 fi
@@ -69,14 +22,6 @@ if [ $? -ne "0" ]; then
 fi
 path=$(dirname $1)
 file=$(basename $1)
-
-# check valid IP address
-ping -c 1 -t 1 $2 &> /dev/null
-if [ $? -ne "0" ]; then
-    echo "[ERROR] Cannot resolve given IP address"
-    exit -1
-fi
-ip=$2
 
 # list and select network interface
 ifconfig -a
@@ -105,59 +50,158 @@ echo Maximum ${size} MB...
 fileName="${path}/${file}.pcap"
 
 # Main window
-frame "TTC PACKLET ANALYZER" "by Jason Huang"
+dialog --backtitle "TTC PACKLET ANALYZER" \
+--title "Welcome" --infobox "script written by Jason Huang" 10 30
 sleep 1
 
 # clear stdin buffer
-while read -r -t 0; do read -r; done
+# while read -r -t 0; do read -r; done
 
-op="x"
-addr="all"
-port="all"
-protocol="all"
-method="all"
+addr=""
+port=""
+protocol=""
+method=""
+other=""
 
-while [ "${op}" != "r" ]; do
-    frame "TTC PACKLET ANALYZER" "* Record at ${ip} and Stored at ${fileName}" \
-    "* Listen on ${net} and maximum size is ${size} MB" \
-    "============================================" \
-    "Options:" \
-    "[a] Specific address: ${addr}" "[b] Specific ports: ${port}" \
-    "[c] Specific protocol: ${protocol}" "[d] Specific http method: ${method}" \
-    "============================================" \
-    "  [r] Start capture     [x] Clear options" \
-    "  [q] Exit the program"
-    read -n1 -s op
-    case ${op} in 
-     "a")
-        clear
-        read -p " Specific address: " addr
+pass="no"
+info=""
+
+re_port="^[0-9]+$"
+re_port_range="^[0-9]+-[0-9]+$"
+
+while [ ${pass} != "yes" ]; do
+
+    filter=""
+
+    # open fd
+    exec 3>&1
+
+    # Store data to $VALUES variable
+    VALUES=$(dialog --backtitle "TTC PACKLET ANALYZER" \
+    --title "Add a capture" \
+    --ok-label "Start capture" --cancel-label "Quit" \
+    --form "${info}* pcap file stored at ${fileName} \n* listen on ${net} and maximum size is ${size} MB \nOptions:" \
+    15 60 0 \
+    "Specific address: "  1 1 "${addr}"     1 25 15 0 \
+    "Specific ports: "    2 1 "${port}"     2 25 15 0 \
+    "Specific protocol: " 3 1 "${protocol}" 3 25 15 0 \
+    "Specific method: "   4 1 "${method}"   4 25 15 0 \
+    "Other configure: "   5 1 "${other}"    5 25 30 0 \
+    2>&1 1>&3)
+
+    if [ $? -ne 0 ]; then 
+        dialog --backtitle "TTC PACKLET ANALYZER" \
+        --title "Quit" \
+        --infobox "\n\n\n\nGoodbye!" 10 30
+        exec 3>&-
+        sleep 1; clear; exit 0
+    fi
+
+    # close fd
+    exec 3>&-
+
+    IFS=$'\n'
+    options=(${VALUES})
+    unset IFS
+
+    addr=${options[0]}
+    port=${options[1]}
+    protocol=${options[2]}
+    method=${options[3]}
+
+    pass="yes"
+
+    # check for ports
+    if [ -z "${port}" ]; then
+        :
+    elif [[ ${port} =~ ${re_port} ]]; then
+        filter="port ${port}"
+    elif [[ ${port} =~ ${re_port_range} ]]; then
+        filter="portrange ${port}"
+    else
+        info="                 *** Bad port! ***\n"
+        pass="no"
+    fi
+
+    # check for protocol
+    if [ -z ${protocol}]; then
+        :
+    else
+        filter="${protocol} ${filter}"
+    fi
+
+    # if method is given, will clean the port and protocol settings
+    case ${method} in
+    "get")
+        filter="port 80 and tcp[((tcp[12:1] & 0xf0) >> 2):4] = 0x47455420"
         ;;
-     "b")
-        clear
-        read -p " Specific ports: " port
+    "post")
+        filter="port 80 and tcp[((tcp[12:1] & 0xf0) >> 2):5] = 0x504F535420"
         ;;
-     "c")
-        clear
-        read -p " Specific protocol: " protocol
+    "")
+        :
         ;;
-     "d")
-        clear
-        read -p " Specific http method: " method
-        ;;
-     "x")
-        addr="all"
-        port="all"
-        protocol="all"
-        method="all"
-        ;;
-     "q")
-        clear
-        frame "Goodbye!"
-        exit 0
+    *)
+        info="                *** Bad method! ***\n"
+        pass="no"
         ;;
     esac
+
+    # finally, add the given address
+    if [ -z "${addr}" ]; then
+        :
+    elif [ -z "${filter}" ]; then
+        filter="host ${addr}"
+    else
+        filter="host ${addr} and ${filter}"
+    fi
+
+    if [ -z "${other}" ]; then
+        :
+    else
+        filter="${filter} and ${other}"
+    fi
+
+    dialog --backtitle "TTC PACKLET ANALYZER" \
+        --title "Add a capture" \
+        --yesno "This is your capture filter: \n\n** ${filter} **\n\nIs that looking good?" 0 0
+
+    if [ $? -ne 0 ]; then 
+        pass="no"
+    fi
+
 done
 
-tshark -i ${net} -w ${fileName} -a filesize:$(( ${size}*1024 )) \
--f ${filter} 
+mkfifo /tmp/pa.log
+tshark -i ${net} -w ${fileName} -a filesize:$(( ${size}*1024 )) -f "${filter}" > /tmp/pa.log 2>&1 &
+tshark_pid=$!
+
+ps -p ${tshark_pid}
+running=$?
+
+progress=("." ".." "..." "...." "....." "...." "..." "..")
+i=0
+
+while [ ${running} -eq 0 ]; do
+    dialog --backtitle "TTC PACKLET ANALYZER" \
+    --title "Capturing" --timeout 1\
+    --ok-label "Stop capture" \
+    --msgbox "\n\nNow Capturing${progress[$(( $i % 8 ))]}\n" 8 40 2>/dev/null
+
+    if [ $? -eq 0 ]; then 
+        dialog --backtitle "TTC PACKLET ANALYZER" \
+        --title "Stopping" \
+        --infobox "\n\nStop capturing..." 8 40
+        kill ${tshark_pid}
+    fi
+
+    ps -p ${tshark_pid} > /dev/null
+    running=$?
+    i=$(( $i + 1 ))
+done
+
+dialog --backtitle "TTC PACKLET ANALYZER" \
+--title "Finished" \
+--infobox "\n\nCapture finished. Goodbye!" 8 40
+
+sleep 2
