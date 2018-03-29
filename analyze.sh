@@ -14,6 +14,25 @@ elif [ $# -ne "1" ]; then
     exit -1
 fi
 
+# check valid dependency
+which tshark > /dev/null
+if [ $? -ne "0" ]; then
+    echo "[ERROR] You must install tshark first. try \"sudo apt install tshark\""
+    exit -1
+fi
+
+which unbuffer > /dev/null
+if [ $? -ne "0" ]; then
+    echo "[ERROR] You must install expect first. try \"sudo apt install expect\""
+    exit -1
+fi
+
+which dialog > /dev/null
+if [ $? -ne "0" ]; then
+    echo "[ERROR] You must install dialog first. try \"sudo apt install dialog\""
+    exit -1
+fi
+
 # check valid file path
 test -d $(dirname $1)
 if [ $? -ne "0" ]; then
@@ -50,7 +69,7 @@ echo Maximum ${size} MB...
 fileName="${path}/${file}.pcap"
 
 # Main window
-dialog --backtitle "TTC PACKLET ANALYZER" \
+dialog --backtitle "TTC PACKET ANALYZER" \
 --title "Welcome" --infobox "script written by Jason Huang" 10 30
 sleep 1
 
@@ -77,7 +96,7 @@ while [ ${pass} != "yes" ]; do
     exec 3>&1
 
     # Store data to $VALUES variable
-    VALUES=$(dialog --backtitle "TTC PACKLET ANALYZER" \
+    VALUES=$(dialog --backtitle "TTC PACKET ANALYZER" \
     --title "Add a capture" \
     --ok-label "Start capture" --cancel-label "Quit" \
     --form "${info}* pcap file stored at ${fileName} \n* listen on ${net} and maximum size is ${size} MB \nOptions:" \
@@ -90,7 +109,7 @@ while [ ${pass} != "yes" ]; do
     2>&1 1>&3)
 
     if [ $? -ne 0 ]; then 
-        dialog --backtitle "TTC PACKLET ANALYZER" \
+        dialog --backtitle "TTC PACKET ANALYZER" \
         --title "Quit" \
         --infobox "\n\n\n\nGoodbye!" 10 30
         exec 3>&-
@@ -162,7 +181,7 @@ while [ ${pass} != "yes" ]; do
         filter="${filter} and ${other}"
     fi
 
-    dialog --backtitle "TTC PACKLET ANALYZER" \
+    dialog --backtitle "TTC PACKET ANALYZER" \
         --title "Add a capture" \
         --yesno "This is your capture filter: \n\n** ${filter} **\n\nIs that looking good?" 0 0
 
@@ -172,9 +191,13 @@ while [ ${pass} != "yes" ]; do
 
 done
 
-mkfifo /tmp/pa.log
-tshark -i ${net} -w ${fileName} -a filesize:$(( ${size}*1024 )) -f "${filter}" > /tmp/pa.log 2>&1 &
-tshark_pid=$!
+logfile='/tmp/pa.log'
+
+# Main process
+touch ${logfile}
+unbuffer tshark -i ${net} -w ${fileName} -b filesize:$(( ${size}*1024 )) -f "${filter}" > /tmp/pa.log 2>&1 &
+sleep 1
+tshark_pid=$( ps | grep -P "/tshark\s.+" | grep -P "^\s*\d+" -o )
 
 ps -p ${tshark_pid}
 running=$?
@@ -183,16 +206,21 @@ progress=("." ".." "..." "...." "....." "...." "..." "..")
 i=0
 
 while [ ${running} -eq 0 ]; do
-    dialog --backtitle "TTC PACKLET ANALYZER" \
+
+    var=$( cat ${logfile} )
+    num=$( echo ${var} | grep -P '\d+$' -o )
+
+    dialog --backtitle "TTC PACKET ANALYZER" \
     --title "Capturing" --timeout 1\
     --ok-label "Stop capture" \
-    --msgbox "\n\nNow Capturing${progress[$(( $i % 8 ))]}\n" 8 40 2>/dev/null
+    --msgbox "\nCapturing on ${net}\nFilter ${filter}\n${num} packet captured${progress[$(( $i % 8 ))]}" 10 40 2>/dev/null
 
     if [ $? -eq 0 ]; then 
-        dialog --backtitle "TTC PACKLET ANALYZER" \
+        dialog --backtitle "TTC PACKET ANALYZER" \
         --title "Stopping" \
         --infobox "\n\nStop capturing..." 8 40
         kill ${tshark_pid}
+        sleep 1
     fi
 
     ps -p ${tshark_pid} > /dev/null
@@ -200,8 +228,9 @@ while [ ${running} -eq 0 ]; do
     i=$(( $i + 1 ))
 done
 
-dialog --backtitle "TTC PACKLET ANALYZER" \
+dialog --backtitle "TTC PACKET ANALYZER" \
 --title "Finished" \
 --infobox "\n\nCapture finished. Goodbye!" 8 40
 
 sleep 2
+clear
